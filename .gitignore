@@ -1,0 +1,7 @@
+# Python
+__pycache__/
+*.pyc
+
+# Env & локальные данные
+.env
+client_records.json
