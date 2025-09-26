@@ -8,38 +8,28 @@ from dotenv import load_dotenv
 from typing import Optional
 from openai import OpenAI
 
-# ===========================
-# Загрузка переменных окружения
-# ===========================
+
 load_dotenv()
 
-# ===========================
-# Настройка логирования
-# ===========================
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger('whatsapp_bot')
 
 
 class WhatsAppBot:
     def __init__(self):
-        # ---- Настройки Green API ----
         self.instance_id = os.environ.get("INSTANCE_ID")
         self.api_token = os.environ.get("INSTANCE_TOKEN")
         self.base_url = f"https://api.green-api.com/waInstance{self.instance_id}"
 
-        # ---- Настройка OpenAI ----
         self.api_key = os.environ.get("OPENAI_API_KEY")
         self.client = OpenAI(api_key=self.api_key)
         self.openai_model = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 
-        # ---- Проверяем переменные ----
         if not all([self.instance_id, self.api_token, self.api_key]):
             raise ValueError("Не заданы переменные окружения: INSTANCE_ID/INSTANCE_TOKEN/OPENAI_API_KEY")
         
         
-        
-
-        # ---- Системный промпт ----
         self.system_prompt = """Ты — тёплый и компетентный бот-консультант по чат-ботам и автоматизации бизнеса в Казахстане.
 
 КОНТЕКСТ И ПРАВИЛА:
@@ -65,15 +55,12 @@ class WhatsAppBot:
 • Продажи → «Квалифицирую лидов, отвечаю на возражения, передаю менеджеру. Показать мини-скрипт под вашу нишу?»
 
 Всегда держись тёплого, уверенного, разговорного тона и помни про KZT (₸)."""
-        # ---- Хранилища в памяти ----
-        self.processed_messages = set()  # дедупликация по idMessage
-        self.history = {}  # chat_id -> list of messages
-        self.last_reply = {}  # chat_id -> last assistant message (anti-duplicate)
+        
+        self.processed_messages = set() 
+        self.history = {} 
+        self.last_reply = {}  
 
-    # ===========================
     # УТИЛИТЫ: отправка/приём WhatsApp
-    # ===========================
-    
     def clear_chat_history(self, chat_id: str):
         """Очистка истории чата для сброса контекста"""
         if chat_id in self.history:
@@ -113,7 +100,6 @@ class WhatsAppBot:
             r = requests.get(url, timeout=15)
             if r.status_code == 200:
                 data = r.json()
-                # Если нет уведомлений — API возвращает null
                 return data
             logger.error("receiveNotification %s %s", r.status_code, r.text)
             return None
@@ -134,15 +120,12 @@ class WhatsAppBot:
             logger.error(f"Ошибка удаления уведомления: {e}")
             return False
 
-    # ===========================
     # LLM
-    # ===========================
     def get_openai_response(self, chat_id: str, user_message: str) -> str:
         """Ответ от OpenAI с использованием ИСТОРИИ диалога и мягких анти-повторов"""
         hist = self.history.setdefault(chat_id, [])
         hist.append({"role": "user", "content": user_message})
 
-        # Собираем последние 12 сообщений, чтобы не раздувать контекст
         window = hist[-12:]
 
         style_rules = (
@@ -172,12 +155,12 @@ class WhatsAppBot:
                 max_tokens=350,
                 temperature=0.8,
                 top_p=0.9,
-                frequency_penalty=0.6,  # мягко штрафуем повторы
+                frequency_penalty=0.6, 
                 presence_penalty=0.5
             )
             answer = resp.choices[0].message.content.strip()
             hist.append({"role": "assistant", "content": answer})
-            self.history[chat_id] = hist[-24:]  # подрезаем длинную историю
+            self.history[chat_id] = hist[-24:]  
             logger.info(f"🧠 GPT ответил: {answer[:80]}...")
             return answer
         except Exception as e:
@@ -185,32 +168,24 @@ class WhatsAppBot:
             return "Простите, произошёл технический сбой. Попробуйте ещё раз через минуту 🙏"
 
 
-    # ===========================
     # БЫСТРАЯ МАРШРУТИЗАЦИЯ (без LLM)
-    # ===========================
     def route_intent(self, text: str) -> Optional[str]:
         t = (text or "").lower().strip()
         logger.info(f"Анализирую текст: '{t}'")
 
-        # Приветствие — только если сообщение СТОПРОЦЕНТНО похоже на приветствие
         hello_set = {"привет", "здравствуйте", "салам", "hi", "hello", "добрый день", "добрый вечер"}
         if t in hello_set or t.replace("!", "") in hello_set:
             return "Привет! Я помогу с ботами и автоматизацией. Расскажу, что умею, или сразу запишу на бесплатную консультацию. Что удобнее? 🙂"
 
-        # Явное желание записаться
         if any(kw in t for kw in ["записаться", "консультац", "созвон", "перезвон", "запишите меня", "appointment"]):
             form = (
                 "Отлично! Запишу вас на бесплатную консультацию. Заполните, пожалуйста, кратко:\n"
                 "Имя: \nКомпания: \nТелефон: \nЗадача (что автоматизировать): "
             )
             return form
-
-        # Всё остальное отдаём LLM
         return None
 
-    # ===========================
     # Сохранение клиента
-    # ===========================
     def save_client_data(self, phone: str, data: dict) -> bool:
         try:
             filename = "client_records.json"
@@ -245,12 +220,9 @@ class WhatsAppBot:
                 info['bot_type'] = line.split(':', 1)[1].strip()
         return info
 
-    # ===========================
     # Основная обработка входящего сообщения
-    # ===========================
     def process_message(self, notification: dict):
         try:
-            # Green API: на верхнем уровне receiptId и body
             if not notification:
                 return
             receipt_id = notification.get('receiptId')
@@ -258,9 +230,7 @@ class WhatsAppBot:
             if not body:
                 return
 
-            # Фильтрация по типу вебхука
             if body.get('typeWebhook') != 'incomingMessageReceived':
-                # важно удалять все уведомления, иначе будут висеть в очереди
                 if receipt_id:
                     self.delete_notification(receipt_id)
                 return
@@ -272,7 +242,6 @@ class WhatsAppBot:
             if 'textMessageData' in message_data:
                 message_text = message_data['textMessageData'].get('textMessage', '')
             else:
-                # Неподдерживаемый тип сообщения — удаляем
                 if receipt_id:
                     self.delete_notification(receipt_id)
                 return
@@ -296,7 +265,6 @@ class WhatsAppBot:
 
             # Команда администратора
             if message_text.strip().startswith('/clients'):
-                # Пример простейшей проверки — подстрой под свой формат номера
                 if phone in {"+77776463138", "77776463138"}:
                     self.handle_clients_command(chat_id)
                 else:
@@ -307,15 +275,12 @@ class WhatsAppBot:
                     self.delete_notification(receipt_id)
                 return
 
-            # Попытка распознать данные клиента до LLM (слот-филлинг)
             if any(k in message_text.lower() for k in ['имя:', 'компания:', 'телефон:', 'name:', 'company:', 'phone:', 'задач']):
                 client_info = self.extract_client_info(message_text)
 
-                # Достанем «задачу», если пользователь её указал свободным текстом
                 if 'задача' not in client_info and 'бот для' in message_text.lower():
                     client_info['bot_type'] = message_text.split(':', 1)[-1].strip()
 
-                # Дособираем недостающие поля
                 need = []
                 if not client_info.get('name'):     need.append("Имя")
                 if not client_info.get('company'):  need.append("Компания")
@@ -353,7 +318,6 @@ class WhatsAppBot:
                     self.delete_notification(receipt_id)
                 return
 
-            # Быстрая маршрутизация (без LLM)
             quick = self.route_intent(message_text)
             if quick:
                 self.send_message(chat_id, quick)
@@ -363,7 +327,6 @@ class WhatsAppBot:
                     self.delete_notification(receipt_id)
                 return
 
-            # Генерация через LLM
             response = self.get_openai_response(chat_id, message_text)
             self.send_message(chat_id, response)
 
@@ -374,14 +337,11 @@ class WhatsAppBot:
 
         except Exception as e:
             logger.error(f"Ошибка обработки сообщения: {e}")
-            # Пытаемся удалить уведомление, чтобы очередь не стопорилась
             rid = notification.get('receiptId') if notification else None
             if rid:
                 self.delete_notification(rid)
 
-    # ===========================
     # /clients команда
-    # ===========================
     def handle_clients_command(self, chat_id: str):
         try:
             filename = "client_records.json"
@@ -396,7 +356,6 @@ class WhatsAppBot:
                 self.send_message(chat_id, "📭 Записей пока нет")
                 return
 
-            # Покажем последние 3 записи
             recent = list(clients.items())[-3:]
             response_lines = ["📋 Последние записи:\n"]
             for phone, data in recent:
@@ -413,13 +372,10 @@ class WhatsAppBot:
         except Exception as e:
             self.send_message(chat_id, f"Ошибка: {e}")
 
-    # ===========================
     # Главный цикл
-    # ===========================
     def run(self):
         logger.info("🤖 Бот запущен!")
 
-        # Включаем получение уведомлений (опционально — зависит от настроек инстанса)
         try:
             settings_url = f"{self.base_url}/setSettings/{self.api_token}"
             settings = {"incomingWebhook": "yes", "pollMessageWebhook": "yes"}
@@ -433,7 +389,6 @@ class WhatsAppBot:
                 if notification:
                     self.process_message(notification)
                 else:
-                    # Нет уведомлений — небольшая пауза
                     time.sleep(1)
             except KeyboardInterrupt:
                 logger.info("⛔ Бот остановлен")
